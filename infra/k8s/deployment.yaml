@@ -1,0 +1,42 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ts-service
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: ts-service
+  template:
+    metadata:
+      labels:
+        app: ts-service
+    spec:
+      containers:
+      - name: ts-service
+        image: ts-service:latest
+        ports:
+        - containerPort: 3000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: python-agents
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: python-agents
+  template:
+    metadata:
+      labels:
+        app: python-agents
+    spec:
+      containers:
+      - name: python-agents
+        image: python-agents:latest
+        ports:
+        - containerPort: 8000
+        env:
+        - name: KAFKA_BROKER
+          value: "redpanda:9092"
