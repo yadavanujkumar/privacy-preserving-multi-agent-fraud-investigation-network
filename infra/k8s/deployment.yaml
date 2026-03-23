@@ -1,7 +1,24 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fraud-investigation-config
+  namespace: default
+data:
+  KAFKA_BROKER: "redpanda:9092"
+  NEO4J_URI: "bolt://neo4j:7687"
+  NEO4J_USER: "neo4j"
+  LOG_LEVEL: "info"
+  HIGH_VALUE_THRESHOLD: "10000"
+  HIGH_CONNECTIONS_THRESHOLD: "10"
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: ts-service
+  namespace: default
+  labels:
+    app: ts-service
+    version: "1.0.0"
 spec:
   replicas: 3
   selector:
@@ -12,16 +29,85 @@ spec:
       labels:
         app: ts-service
     spec:
+      terminationGracePeriodSeconds: 30
       containers:
       - name: ts-service
         image: ts-service:latest
         ports:
         - containerPort: 3000
+          name: http
+        envFrom:
+        - configMapRef:
+            name: fraud-investigation-config
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+          limits:
+            cpu: "500m"
+            memory: "512Mi"
+        livenessProbe:
+          httpGet:
+            path: /health/live
+            port: http
+          initialDelaySeconds: 10
+          periodSeconds: 15
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health/ready
+            port: http
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          failureThreshold: 3
+        securityContext:
+          allowPrivilegeEscalation: false
+          runAsNonRoot: true
+          readOnlyRootFilesystem: true
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ts-service
+  namespace: default
+spec:
+  selector:
+    app: ts-service
+  ports:
+  - name: http
+    protocol: TCP
+    port: 80
+    targetPort: 3000
+  type: ClusterIP
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: ts-service-hpa
+  namespace: default
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: ts-service
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: python-agents
+  namespace: default
+  labels:
+    app: python-agents
+    version: "1.0.0"
 spec:
   replicas: 2
   selector:
@@ -32,11 +118,79 @@ spec:
       labels:
         app: python-agents
     spec:
+      terminationGracePeriodSeconds: 60
       containers:
       - name: python-agents
         image: python-agents:latest
         ports:
         - containerPort: 8000
+          name: http
+        envFrom:
+        - configMapRef:
+            name: fraud-investigation-config
         env:
-        - name: KAFKA_BROKER
-          value: "redpanda:9092"
+        - name: NEO4J_PASS
+          valueFrom:
+            secretKeyRef:
+              name: fraud-investigation-secrets
+              key: neo4j_password
+        resources:
+          requests:
+            cpu: "200m"
+            memory: "256Mi"
+          limits:
+            cpu: "1000m"
+            memory: "1Gi"
+        livenessProbe:
+          httpGet:
+            path: /health/live
+            port: http
+          initialDelaySeconds: 15
+          periodSeconds: 20
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health/ready
+            port: http
+          initialDelaySeconds: 10
+          periodSeconds: 15
+          failureThreshold: 3
+        securityContext:
+          allowPrivilegeEscalation: false
+          runAsNonRoot: true
+          readOnlyRootFilesystem: true
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: python-agents
+  namespace: default
+spec:
+  selector:
+    app: python-agents
+  ports:
+  - name: http
+    protocol: TCP
+    port: 80
+    targetPort: 8000
+  type: ClusterIP
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: python-agents-hpa
+  namespace: default
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: python-agents
+  minReplicas: 2
+  maxReplicas: 8
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
