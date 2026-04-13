@@ -24,18 +24,17 @@ class AgentState(TypedDict):
 
 def fetch_graph_features(state: AgentState) -> AgentState:
     try:
-        driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASS))
-        with driver.session() as session:
-            result = session.run(
-                """
-                MATCH (a:Account {id: $source})-[:TRANSACTED_WITH*1..2]-(connected)
-                RETURN count(DISTINCT connected) AS connections
-                """,
-                source=state["transaction"].get("source", ""),
-            )
-            record = result.single()
-            state["graph_connections"] = record["connections"] if record else 0
-        driver.close()
+        with GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASS)) as driver:
+            with driver.session() as session:
+                result = session.run(
+                    """
+                    MATCH (a:Account {id: $source})-[:TRANSACTED_WITH*1..2]-(connected)
+                    RETURN count(DISTINCT connected) AS connections
+                    """,
+                    source=state["transaction"].get("source", ""),
+                )
+                record = result.single()
+                state["graph_connections"] = record["connections"] if record else 0
     except Exception as exc:  # noqa: BLE001
         logger.warning("Neo4j unavailable, defaulting graph_connections to 0: %s", exc)
         state["graph_connections"] = 0
